@@ -171,6 +171,7 @@ public class MavenProjectImporter extends AbstractProjectImporter {
 		IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
 		Collection<IProject> projects = new LinkedHashSet<>();
 		Collection<MavenProjectInfo> toImport = new LinkedHashSet<>();
+		Collection<java.nio.file.Path> toUpdateDigest = new LinkedHashSet<>();
 		long lastWorkspaceStateSaved = getLastWorkspaceStateModified();
 		Set<String> artifactIds = new LinkedHashSet<>();
 		//Separate existing projects from new ones
@@ -188,7 +189,7 @@ public class MavenProjectImporter extends AbstractProjectImporter {
 				}
 			}
 			if (container == null) {
-				digestStore.updateDigest(pom.toPath());
+				toUpdateDigest.add(pom.toPath());
 				toImport.add(projectInfo);
 				artifactIds.add(projectInfo.getModel().getArtifactId());
 			} else {
@@ -198,7 +199,7 @@ public class MavenProjectImporter extends AbstractProjectImporter {
 					projects.add(container.getProject());
 				} else if (project != null) {
 					//Project doesn't have the Maven nature, so we (re)import it
-					digestStore.updateDigest(pom.toPath());
+					toUpdateDigest.add(pom.toPath());
 					// need to delete project due to m2e failing to create if linked and not the same name
 					project.delete(IProject.FORCE | IProject.NEVER_DELETE_PROJECT_CONTENT, subMonitor.split(5));
 					toImport.add(projectInfo);
@@ -206,6 +207,9 @@ public class MavenProjectImporter extends AbstractProjectImporter {
 				}
 			}
 
+		}
+		if (!toUpdateDigest.isEmpty()) {
+			digestStore.updateDigests(toUpdateDigest);
 		}
 		if (!toImport.isEmpty()) {
 			ProjectImportConfiguration importConfig = new ProjectImportConfiguration();
@@ -227,8 +231,12 @@ public class MavenProjectImporter extends AbstractProjectImporter {
 					while (i++ < MAX_PROJECTS_TO_IMPORT && iter.hasNext()) {
 						importPartial.add(iter.next());
 					}
-					List<IMavenProjectImportResult> result = configurationManager.importProjects(importPartial, importConfig, monitor2.split(MAX_PROJECTS_TO_IMPORT));
-					results.addAll(result);
+					try {
+						List<IMavenProjectImportResult> result = configurationManager.importProjects(importPartial, importConfig, monitor2.split(MAX_PROJECTS_TO_IMPORT));
+						results.addAll(result);
+					} catch (CoreException e) {
+						JavaLanguageServerPlugin.logException("Failed to import a batch of Maven projects", e);
+					}
 					monitor2.setWorkRemaining(toImport.size() * 2 - it * MAX_PROJECTS_TO_IMPORT);
 				}
 				List<IProject> imported = new ArrayList<>(results.size());
@@ -239,7 +247,11 @@ public class MavenProjectImporter extends AbstractProjectImporter {
 				updateProjects(imported, lastWorkspaceStateSaved, monitor2.split(projects.size()));
 				monitor2.done();
 			} else {
-				configurationManager.importProjects(toImport, importConfig, subMonitor.split(75));
+				try {
+					configurationManager.importProjects(toImport, importConfig, subMonitor.split(75));
+				} catch (CoreException e) {
+					JavaLanguageServerPlugin.logException("Failed to configure some Maven project(s)", e);
+				}
 			}
 		}
 		subMonitor.setWorkRemaining(20);

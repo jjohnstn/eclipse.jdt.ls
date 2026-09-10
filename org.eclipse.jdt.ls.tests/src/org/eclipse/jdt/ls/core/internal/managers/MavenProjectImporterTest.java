@@ -175,6 +175,29 @@ public class MavenProjectImporterTest extends AbstractMavenBasedTest {
 	}
 
 	@Test
+	public void testDigestStoreBatchUpdate() throws Exception {
+		Path stateLocation = Files.createTempDirectory("digest-store-test");
+		try {
+			Path first = stateLocation.resolve("first-pom.xml");
+			Path second = stateLocation.resolve("second-pom.xml");
+			Files.write(first, List.of("first"));
+			Files.write(second, List.of("second"));
+
+			DigestStore digestStore = new DigestStore(stateLocation.toFile());
+			assertTrue(digestStore.updateDigests(List.of(first, second)));
+			assertFalse(digestStore.updateDigests(List.of(first, second)));
+
+			DigestStore persistedDigestStore = new DigestStore(stateLocation.toFile());
+			assertFalse(persistedDigestStore.updateDigests(List.of(first, second)));
+
+			Files.write(first, List.of("changed"));
+			assertTrue(persistedDigestStore.updateDigests(List.of(first, second)));
+		} finally {
+			FileUtils.deleteDirectory(stateLocation.toFile());
+		}
+	}
+
+	@Test
 	public void testPreexistingIProjectDifferentName() throws Exception {
 		File from = new File(getSourceProjectDirectory(), "maven/salut");
 		Path projectDir = Files.createTempDirectory("testImportDifferentName");
@@ -513,7 +536,11 @@ public class MavenProjectImporterTest extends AbstractMavenBasedTest {
 		assertEquals(1, javaProjects.length);
 		StandardProjectsManager.cleanInvalidJavaProjects(new NullProgressMonitor());
 		javaProjects = ProjectUtils.getJavaProjects();
-		assertEquals(0, javaProjects.length);
+		// Since m2e 2.11.1 (eclipse-m2e/m2e-core#2160), the unsafe ancestor resource
+		// folder declared in module1 (<directory>../</directory>) is skipped instead of
+		// failing the import, so module1 is now imported as a valid Java project and is
+		// retained after cleaning up invalid projects.
+		assertEquals(1, javaProjects.length);
 	}
 
 	private static class MavenUpdateProjectJobSpy extends JobChangeAdapter {
